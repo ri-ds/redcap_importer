@@ -1,14 +1,14 @@
-import json
 import datetime
 from io import StringIO
 import sys
+import time
 
 from django.core.management.base import BaseCommand, CommandError
 from django.apps import apps
 
 import requests
 from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
+# from urllib3.util.retry import Retry
 
 from redcap_importer import models
 
@@ -22,8 +22,9 @@ class Command(BaseCommand):
         # make several attempts to recover from network errors
         # https://stackoverflow.com/questions/23013220/max-retries-exceeded-with-url-in-requests
         session = requests.Session()
-        retry = Retry(connect=3, backoff_factor=0.5)
-        adapter = HTTPAdapter(max_retries=retry)
+        # retry = Retry(connect=1, backoff_factor=0.5)
+        # adapter = HTTPAdapter(max_retries=retry)
+        adapter = HTTPAdapter()
         super().__init__(*args, **kwargs)
         session.mount("http://", adapter)
         session.mount("https://", adapter)
@@ -58,7 +59,18 @@ class Command(BaseCommand):
         addl_options["format"] = "json"
         addl_options["returnFormat"] = "json"
         self.query_count += 1
-        return self.session.post(oConnection.api_url.url, addl_options).json()
+        for i in range(500):
+            try:
+                response = self.session.post(oConnection.api_url.url, addl_options).json()
+                break
+            except requests.exceptions.ConnectionError as e:
+                print("fail time: ", datetime.datetime.now())
+                print("fail # {}. url: {}; options: {}".format(i, oConnection.api_url.url, addl_options))
+                time.sleep(10)
+                continue
+        return response
+
+
 
     def handle(self, *args, **options):
         connection_name = options["connection_name"]

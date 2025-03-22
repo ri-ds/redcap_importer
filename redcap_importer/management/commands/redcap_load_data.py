@@ -8,7 +8,6 @@ from django.apps import apps
 
 import requests
 from requests.adapters import HTTPAdapter
-# from urllib3.util.retry import Retry
 
 from redcap_importer import models
 
@@ -19,11 +18,7 @@ class Command(BaseCommand):
     def __init__(self, *args, **kwargs):
         self.query_count = 0
         self.log_comments = []  # a list of comments to save with the ETL log
-        # make several attempts to recover from network errors
-        # https://stackoverflow.com/questions/23013220/max-retries-exceeded-with-url-in-requests
         session = requests.Session()
-        # retry = Retry(connect=1, backoff_factor=0.5)
-        # adapter = HTTPAdapter(max_retries=retry)
         adapter = HTTPAdapter()
         super().__init__(*args, **kwargs)
         session.mount("http://", adapter)

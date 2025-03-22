@@ -2,6 +2,7 @@ import json
 import datetime
 import requests
 import dateparser
+import time
 
 from redcap_importer.models import RedcapConnection, FieldMetadata, EtlLog
 
@@ -130,13 +131,19 @@ class UploadToRedcap:
         addl_options["token"] = self.connection.get_api_token()
         addl_options["format"] = "json"
         addl_options["returnFormat"] = "json"
-        # print(addl_options)
         self.query_count += 1
         if self.create_log_entry:
             self.update_log_entry_start_query()
-        return requests.post(self.connection.api_url.url, addl_options).json()
-        # print(oConnection.api_url.url, addl_options)
-        # return {}
+        for i in range(500):
+            try:
+                response = requests.post(self.connection.api_url.url, addl_options).json()
+                break
+            except requests.exceptions.ConnectionError as e:
+                print("fail time: ", datetime.datetime.now())
+                print("fail # {}. url: {}; options: {}".format(i, self.connection.api_url.url, addl_options))
+                time.sleep(10)
+                continue
+        return response
 
     def process_record(self, record):
         out_record = {}

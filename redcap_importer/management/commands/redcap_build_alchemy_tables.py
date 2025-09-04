@@ -10,9 +10,6 @@ from sqlalchemy import create_engine, MetaData
 from sqlalchemy import Table, Column
 from sqlalchemy import BigInteger,  Boolean, Date, Float, ForeignKey, Integer, String, Text
 
-# Create engine and metadata
-engine = create_engine("sqlite+pysqlite:///:memory:", echo=True)
-metadata_obj = MetaData()
 
 # This class takes the metadata from the RedcapConnection Django Model and uses it
 # to create SQL tables, via SQL Alchemy Core.
@@ -25,6 +22,10 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         connection_name = options["connection_name"]
         oProject = models.RedcapConnection.objects.get(unique_name=connection_name).projectmetadata
+        
+        # Create engine and metadata, clearing existing data.
+        engine = create_engine("sqlite+pysqlite:///"+connection_name+".sqlite3", echo=True)
+        self.metadata_obj = MetaData()
 
         # Dictionary to store all table objects.
         self.tables = {}
@@ -38,7 +39,7 @@ class Command(BaseCommand):
             self.create_lookup_tables(oInstrument)
 
         # Create all tables in the database from the saved SQL Alchemy tables.
-        metadata_obj.create_all(engine)
+        self.metadata_obj.create_all(engine)
         
         # Print summary.
         print("Successfully created {} tables:".format(len(self.tables)))
@@ -50,7 +51,7 @@ class Command(BaseCommand):
         table_name = "project_root"
         table = Table(
             table_name,
-            metadata_obj,
+            self.metadata_obj,
             Column(oProject.primary_key_field, String(255), primary_key=True), # Is this actually a CharField or should it be an Int?
             Column("{}_display".format(oProject.primary_key_field), Text, nullable=True),
         )
@@ -64,7 +65,7 @@ class Command(BaseCommand):
         table_name = "redcap_event"
         table = Table(
             table_name,
-            metadata_obj,
+            self.metadata_obj,
             Column("id", Integer, primary_key=True, autoincrement=True),
             Column("project_root_id", String(255), ForeignKey("project_root.{}".format(oProject.primary_key_field), ondelete="CASCADE")),
             Column("event_unique_name", Text),
@@ -107,7 +108,7 @@ class Command(BaseCommand):
                 columns.append(Column("{}_display_value".format(field_name), Text, nullable=True))
         
         # Create instrument table with all created columns and save it.
-        table = Table(table_name, metadata_obj, *columns)
+        table = Table(table_name, self.metadata_obj, *columns)
         self.tables[table_name] = table
 
     # Create lookup tables for the fields that were skipped in create_instrument_table.
@@ -120,7 +121,7 @@ class Command(BaseCommand):
             
             table = Table(
                 lookup_table_name,
-                metadata_obj,
+                self.metadata_obj,
                 Column("id", Integer, primary_key=True, autoincrement=True),
                 Column("{}_id".format(instrument_table_name), Integer, ForeignKey("{}.id".format(instrument_table_name), ondelete="CASCADE")),
                 Column(field_name, Text),

@@ -85,9 +85,9 @@ class Command(BaseCommand):
         self.query_count = 0
         
         # Initialize SQLAlchemy engine and metadata
-        engine = create_engine("sqlite+pysqlite:///"+connection_name+".sqlite3", echo=False)
+        self.engine = create_engine("sqlite+pysqlite:///"+connection_name+".sqlite3", echo=False)
         self.metadata_obj = MetaData()
-        self.metadata_obj.reflect(bind=engine)
+        self.metadata_obj.reflect(bind=self.engine)
         self.print_out("Connected to SQLite database")
         
         self.oEtlLog = models.EtlLog(
@@ -99,7 +99,7 @@ class Command(BaseCommand):
         self.start_capture_stdout()
 
         # Clear existing data from SQLite database
-        with engine.begin() as conn:
+        with self.engine.begin() as conn:
             # Get project_root table
             if 'project_root' in self.metadata_obj.tables:
                 project_root_table = self.metadata_obj.tables['project_root']
@@ -115,6 +115,7 @@ class Command(BaseCommand):
                 "fields": oConnection.projectmetadata.primary_key_field,
             },
         )
+        
         pk_list = []
         for entry in response:
             pk = entry[oConnection.projectmetadata.primary_key_field]
@@ -132,6 +133,7 @@ class Command(BaseCommand):
                 for entry in response:
                     self.insert_longitudinal(entry, oConnection)
             else:
+                self.print_out("alive2", log=True)
                 for entry in response:
                     self.insert_non_longitudinal(entry, oConnection)
         
@@ -213,9 +215,14 @@ class Command(BaseCommand):
                 if self.has_instrument_data(entry, oInstrument):
                     self.insert_instrument_data(oInstrument, entry, redcap_event_id=event_id)
 
+
+
+
+
+
     def ensure_project_root(self, pk_value, pk_field):
         """Ensure project root exists in SQLite, return the primary key"""
-        project_root_table = self.metadata.tables['project_root']
+        project_root_table = self.metadata_obj.tables['project_root']
         
         with self.engine.begin() as conn:
             # Check if exists
@@ -237,7 +244,7 @@ class Command(BaseCommand):
 
     def ensure_event_record(self, project_root_id, entry, oEventMetadata):
         """Ensure event record exists in SQLite for longitudinal projects, return event ID"""
-        event_table = self.metadata.tables['redcap_event']
+        event_table = self.metadata_obj.tables['redcap_event']
         
         event_name = entry["redcap_event_name"]
         repeat_instance = entry.get("redcap_repeat_instance")
@@ -291,11 +298,12 @@ class Command(BaseCommand):
         """Insert instrument data into SQLite using Django metadata for field mapping"""
         table_name = oInstrumentMetadata.get_django_model_name().lower()
         
-        if table_name not in self.metadata.tables:
+        if table_name not in self.metadata_obj.tables:
             self.print_out(f"Warning: Table {table_name} not found in SQLite database", log=True)
             return
         
-        table = self.metadata.tables[table_name]
+        table = self.metadata_obj.tables[table_name]
+        self.print_out(table_name, log=True)
         
         with self.engine.begin() as conn:
             # Build insert values
@@ -318,6 +326,8 @@ class Command(BaseCommand):
                 # Regular field
                 if field_name in entry and entry[field_name] not in ['', None]:
                     values[field_name] = entry[field_name]
+                    self.print_out(field_name, log=True)
+                    self.print_out(entry[field_name], log=True)
                 
                 # Display value field
                 if oField.get_display_lookup():
@@ -337,6 +347,12 @@ class Command(BaseCommand):
             
             # Insert the main instrument record
             if values:  # Only insert if we have data
+                self.print_out("alive", log=True)
+
+                stmt = insert(table).values(**values)
+                self.print_out(stmt.compile(compile_kwargs={"literal_binds": True}), log=True)
+                self.print_out(values, log=True)
+
                 result = conn.execute(insert(table).values(**values))
                 instrument_record_id = result.inserted_primary_key[0]
                 
@@ -347,15 +363,68 @@ class Command(BaseCommand):
                         data['value'], instrument_record_id
                     )
 
+    def convert_value_types(self, entry, oField):
+        if entry[oField.unique_name] == "":
+                return
+        if oField.django_data_type == "FloatField":
+            try:
+                value = float(entry[oField.unique_name])
+            except ValueError:
+                print(
+                    "unable to convert string to float for {}: {}".format(
+                        oField.get_django_field_name(), entry[oField.unique_name]
+                    )
+                )
+                return
+        elif oField.django_data_type == "IntegerField":
+            try:
+                value = int(entry[oField.unique_name])
+            except ValueError:
+                print(
+                    "unable to convert string to integer for {}: {}".format(
+                        self.get_django_field_name(), entry[self.unique_name]
+                    )
+                )
+                return
+        elif self.django_data_type == "DateField":
+            date_str = entry[self.unique_name]
+            if date_str:
+                try:
+                    value = parse(date_str)
+                except ValueError:
+                    print(
+                        "unable to convert string to date for {}: {}".format(
+                            self.get_django_field_name(), date_str
+                        )
+                    )
+                    return
+        elif self.django_data_type == "BooleanField":
+            x = entry[self.unique_name]
+            if x is True or x == 1 or x == "1":
+                value = True
+            elif x is False or x == 0 or x == "0":
+                value = False
+            elif x is None:
+                value = None
+            else:
+                print(
+                    "Unrecognized value for boolean field for {}, setting to None: {}".format(
+                        self.get_django_field_name(), entry[self.unique_name]
+                    )
+                )
+                value = None
+        else:
+            value = entry[self.unique_name]
+
     def insert_many_to_many_data(self, conn, instrument_table_name, field_name, oField, field_value, instrument_record_id):
         """Insert many-to-many field data into lookup table"""
         lookup_table_name = f"{instrument_table_name}_{field_name}_lookup"
         
-        if lookup_table_name not in self.metadata.tables:
+        if lookup_table_name not in self.metadata_obj.tables:
             self.print_out(f"Warning: Lookup table {lookup_table_name} not found", log=True)
             return
         
-        lookup_table = self.metadata.tables[lookup_table_name]
+        lookup_table = self.metadata_obj.tables[lookup_table_name]
         
         # Handle multiple values (assuming they're separated by some delimiter)
         if isinstance(field_value, str) and ',' in field_value:

@@ -214,6 +214,8 @@ class Command(BaseCommand):
 
         for comment in output:
             print(comment)
+        if len(output) == 0:
+            print("no schema changes detected")
         return
 
     def process_field_entry(self, entry):

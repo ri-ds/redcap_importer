@@ -422,7 +422,7 @@ class FieldMetadata(models.Model):
         if self.is_many_to_many:
             field_names = self._get_many_to_many_redcap_fields()
             for key, field_name in field_names.items():
-                if entry[field_name] == "1":
+                if entry.get(field_name) == "1":
                     app_name = self.instrument.project.connection.unique_name
                     model_name = "{}_{}_lookup".format(
                         self.instrument.get_django_model_name(), self.get_django_field_name()
@@ -437,7 +437,7 @@ class FieldMetadata(models.Model):
                     oLookupModel = LookupModel(**args)
                     oLookupModel.save()
         else:
-            if not self.unique_name in entry:
+            if self.unique_name not in entry:
                 # print('field missing from data: {}'.format(self.unique_name))
                 # there are fields that don't return a value because they are just a label or something
                 return
